@@ -24,20 +24,17 @@ jobs:
 
       - name: Generate Android Project & Build APK
         run: |
-          # 1. Download official raylib source
+          # 1. Clone raylib source
           git clone --depth 1 https://github.com/raysan5/raylib.git raylib-src
 
-          # 2. Setup standard Gradle Android structure
+          # 2. Setup standard Android project directories
           mkdir -p app/src/main/cpp
           mkdir -p app/src/main/res/values
 
           # 3. Create AndroidManifest.xml
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              package="com.sololeveling.survival3d"
-              android:versionCode="1"
-              android:versionName="1.0">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-feature android:glEsVersion="0x00020000" android:required="true" />
               <application
                   android:allowBackup="true"
@@ -74,34 +71,39 @@ jobs:
           target_link_libraries(main raylib android log GLESv2 EGL m)
           EOF
 
-          # 5. Move user code
+          # 5. Copy game code
           cp main.c app/src/main/cpp/main.c
 
-          # 6. Create root and app build.gradle
+          # 6. Create root settings.gradle and build.gradle
           cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "SoloLevelingSurvival"
           include ':app'
           EOF
 
           cat << 'EOF' > build.gradle
-          buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.1.4'
-              }
-          }
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
+          plugins {
+              id 'com.android.application' version '8.2.0' apply false
           }
           EOF
 
           cat << 'EOF' > app/build.gradle
-          apply plugin: 'com.android.application'
+          plugins {
+              id 'com.android.application'
+          }
 
           android {
               namespace 'com.sololeveling.survival3d'
@@ -138,8 +140,8 @@ jobs:
           }
           EOF
 
-          # 7. Generate wrapper & compile APK
-          gradle wrapper
+          # 7. Generate pinned Gradle wrapper and compile APK
+          gradle wrapper --gradle-version 8.2
           ./gradlew assembleDebug
 
       - name: Upload Android APK
