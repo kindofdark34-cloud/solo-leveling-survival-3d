@@ -22,24 +22,128 @@ jobs:
         run: |
           sdkmanager --install "ndk;25.2.9519653" "build-tools;34.0.0" "platforms;android-34"
 
-      - name: Build APK via Raylib Android Shell
+      - name: Generate Android Project & Build APK
         run: |
+          # 1. Download official raylib source
           git clone --depth 1 https://github.com/raysan5/raylib.git raylib-src
-          git clone --depth 1 https://github.com/subtilis/raylib-android-template.git android-project || git clone --depth 1 https://github.com/swill/raylib-android-template.git android-project
-          
-          # Inject game source code
-          mkdir -p android-project/app/src/main/cpp
-          cp main.c android-project/app/src/main/cpp/main.c
-          cp -r raylib-src/src/* android-project/app/src/main/cpp/
-          
-          cd android-project
-          chmod +x gradlew
+
+          # 2. Setup standard Gradle Android structure
+          mkdir -p app/src/main/cpp
+          mkdir -p app/src/main/res/values
+
+          # 3. Create AndroidManifest.xml
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.sololeveling.survival3d"
+              android:versionCode="1"
+              android:versionName="1.0">
+              <uses-feature android:glEsVersion="0x00020000" android:required="true" />
+              <application
+                  android:allowBackup="true"
+                  android:icon="@android:drawable/sym_def_app_icon"
+                  android:label="Solo Leveling 3D"
+                  android:hasCode="false">
+                  <activity
+                      android:name="android.app.NativeActivity"
+                      android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+                      android:configChanges="orientation|keyboardHidden|screenSize"
+                      android:exported="true">
+                      <meta-data android:name="android.app.lib_name" android:value="main" />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          # 4. Create CMakeLists.txt
+          cat << 'EOF' > app/src/main/cpp/CMakeLists.txt
+          cmake_minimum_required(VERSION 3.10.2)
+          project(SoloLevelingSurvival)
+
+          set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -Wall")
+          add_definitions(-DPLATFORM_ANDROID -DGRAPHICS_API_OPENGL_ES2)
+
+          add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../raylib-src ${CMAKE_CURRENT_BINARY_DIR}/raylib_build)
+
+          add_library(main SHARED main.c ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)
+          target_include_directories(main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../../raylib-src/src ${ANDROID_NDK}/sources/android/native_app_glue)
+          target_link_libraries(main raylib android log GLESv2 EGL m)
+          EOF
+
+          # 5. Move user code
+          cp main.c app/src/main/cpp/main.c
+
+          # 6. Create root and app build.gradle
+          cat << 'EOF' > settings.gradle
+          include ':app'
+          EOF
+
+          cat << 'EOF' > build.gradle
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.1.4'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
+
+          cat << 'EOF' > app/build.gradle
+          apply plugin: 'com.android.application'
+
+          android {
+              namespace 'com.sololeveling.survival3d'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.sololeveling.survival3d"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+
+                  externalNativeBuild {
+                      cmake {
+                          arguments "-DANDROID_STL=c++_static"
+                      }
+                  }
+                  ndk {
+                      abiFilters 'arm64-v8a', 'armeabi-v7a'
+                  }
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+
+              externalNativeBuild {
+                  cmake {
+                      path "src/main/cpp/CMakeLists.txt"
+                  }
+              }
+          }
+          EOF
+
+          # 7. Generate wrapper & compile APK
+          gradle wrapper
           ./gradlew assembleDebug
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
           name: SoloLeveling-Android-APK
-          path: |
-            android-project/app/build/outputs/apk/debug/*.apk
-            android-project/**/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
